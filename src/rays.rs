@@ -131,8 +131,9 @@ fn clamp(val: f32) -> f32 {
 
 fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
     let z = rand::distributions::Range::new(-1., 1.).ind_sample(rng);
+    let r = (1. - z*z).sqrt();
     let angle = rand::distributions::Range::new(0., PI_2).ind_sample(rng);
-    Vec3::new(angle.cos(), angle.sin(), z)
+    Vec3::new(r*angle.cos(), r*angle.sin(), z)
 }
 
 fn main() {
@@ -180,6 +181,7 @@ fn main() {
                 start: Point3::new(0., 0., -8.0),
                 dir: Vec3::new(cx, cy, 8.0)
             };
+            let mut strength = 1.;
             for _ in 0..num_bounces {
                 if let Some(intersection) = scene.intersect(ray) {
                     let light_ray = Ray3 {
@@ -197,7 +199,7 @@ fn main() {
                     if can_see_light {
                         let light_strength = 10.0 / light_ray.dir.mag2();
                         let scale = (intersection.normal.mag2() * light_ray.dir.mag2()).sqrt();
-                        total_light += light_strength * intersection.normal.dot(light_ray.dir) / scale;
+                        total_light += strength * light_strength * intersection.normal.dot(light_ray.dir) / scale;
                     }
 
                     let cand_dir = rand_sphere(&mut rng);
@@ -209,7 +211,8 @@ fn main() {
                     ray = Ray3 {
                         start: intersection.point,
                         dir: dir
-                    }
+                    };
+                    strength *= dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
                 } else {
                     break;
                 }
