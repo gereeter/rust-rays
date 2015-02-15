@@ -1,13 +1,124 @@
-//!An example of generating julia fractals.
+//!A raytracer.
 #![feature(path, io)]
-extern crate num;
 extern crate image;
 
 use std::old_io::File;
-use num::complex::Complex;
+use std::ops::{Add, Mul, Sub};
+
+#[derive(Copy)]
+struct Vec3 {
+    vals: [f32; 3]
+}
+
+impl Add<Vec3> for Vec3 {
+    type Output = Vec3;
+    fn add(self, other: Vec3) -> Vec3 {
+        Vec3 {
+            vals: [
+                self.vals[0] + other.vals[0],
+                self.vals[1] + other.vals[1],
+                self.vals[2] + other.vals[2]
+            ]
+        }
+    }
+}
+
+impl Sub<Vec3> for Vec3 {
+    type Output = Vec3;
+    fn sub(self, other: Vec3) -> Vec3 {
+        Vec3 {
+            vals: [
+                self.vals[0] - other.vals[0],
+                self.vals[1] - other.vals[1],
+                self.vals[2] - other.vals[2]
+            ]
+        }
+    }
+}
+
+impl Mul<f32> for Vec3 {
+    type Output = Vec3;
+    fn mul(self, other: f32) -> Vec3 {
+        Vec3 {
+            vals: [
+                self.vals[0] * other,
+                self.vals[1] * other,
+                self.vals[2] * other
+            ]
+        }
+    }
+}
+
+impl Vec3 {
+    fn dot(self, other: Vec3) -> f32 {
+        self.vals[0] * other.vals[0] + self.vals[1] * other.vals[1] + self.vals[2] * other.vals[2]
+    }
+
+    fn mag2(self) -> f32 {
+        self.dot(self)
+    }
+}
+
+#[derive(Copy)]
+struct Point3 {
+    inner: Vec3
+}
+
+impl Sub<Point3> for Point3 {
+    type Output = Vec3;
+    fn sub(self, other: Point3) -> Vec3 {
+        self.inner - other.inner
+    }
+}
+
+impl Add<Vec3> for Point3 {
+    type Output = Point3;
+    fn add(self, other: Vec3) -> Point3 {
+        Point3 { inner: self.inner + other }
+    }
+}
+
+
+
+#[derive(Copy)]
+struct Ray3 {
+    start: Point3,
+    dir: Vec3
+}
+
+
+
+
+struct Scene {
+    center: Point3,
+    radius: f32
+}
+
+impl Scene {
+    fn intersect(&self, ray: Ray3) -> Option<()> {
+        let offset = ray.start - self.center;
+
+        let a = ray.dir.mag2();
+        let b = 2. * offset.dot(ray.dir);
+        let c = offset.mag2() - self.radius*self.radius;
+
+        let descrim = b*b - 4.*a*c;
+        if descrim > 0. {
+            Some(())
+        } else {
+            None
+        }
+    }
+}
+
+
+
 
 fn main() {
-    let max_iterations = 256u16;
+    let scene = Scene {
+        center: Point3 { inner: Vec3 { vals: [0.5, 0.0, 3.0] } },
+        radius: 0.3
+    };
 
     let imgx = 800;
     let imgy = 800;
@@ -23,21 +134,19 @@ fn main() {
         let cy = y as f32 * scaley - 2.0;
         let cx = x as f32 * scalex - 2.0;
 
-        let mut z = Complex::new(cx, cy);
-        let c = Complex::new(-0.4, 0.6);
+        let ray = Ray3 {
+            start: Point3 { inner: Vec3 { vals: [0., 0., 0.] } },
+            dir: Vec3 { vals: [cx, cy, 1.0] }
+        };
 
-        let mut i = 0;
-        for t in (0..max_iterations) {
-            if z.norm() > 2.0 {
-                break
-            }
-            z = z * z + c;
-            i = t;
-        }
+        let value: f32 = match scene.intersect(ray) {
+            Some(_) => 1.,
+            None => 0.
+        };
 
         // Create an 8bit pixel of type Luma and value i
         // and assign in to the pixel at position (x, y)
-        *pixel = image::Luma([i as u8]);
+        *pixel = image::Luma([(value*255.) as u8]);
     }
 
     // Save the image as “out.png”
