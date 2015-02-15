@@ -1,9 +1,13 @@
 //!A raytracer.
 #![feature(path, io)]
 extern crate image;
+extern crate rand;
 
 use std::old_io::File;
 use std::num::Float;
+use std::f32::consts::PI_2;
+
+use rand::distributions::IndependentSample;
 
 use point::Point3;
 use vec::Vec3;
@@ -125,7 +129,17 @@ fn clamp(val: f32) -> f32 {
     }
 }
 
+fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
+    let z = rand::distributions::Range::new(-1., 1.).ind_sample(rng);
+    let angle = rand::distributions::Range::new(0., PI_2).ind_sample(rng);
+    Vec3::new(angle.cos(), angle.sin(), z)
+}
+
 fn main() {
+    let mut rng = rand::thread_rng();
+
+    let num_bounces = 10;
+    let rays_per_pixel = 10;
     let scene = (
         (Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
@@ -160,39 +174,51 @@ fn main() {
         let cy = -(y as f32 * scaley - 2.0);
         let cx = x as f32 * scalex - 2.0;
 
-        let ray = Ray3 {
-            start: Point3::new(0., 0., -8.0),
-            dir: Vec3::new(cx, cy, 8.0)
-        };
+        let mut total_light = 0.;
+        for _ in 0..rays_per_pixel {
+            let mut ray = Ray3 {
+                start: Point3::new(0., 0., -8.0),
+                dir: Vec3::new(cx, cy, 8.0)
+            };
+            for _ in 0..num_bounces {
+                if let Some(intersection) = scene.intersect(ray) {
+                    let light_ray = Ray3 {
+                        start: intersection.point,
+                        dir: light - intersection.point
+                    };
 
-        let value: f32 = match scene.intersect(ray) {
-            Some(intersection) => {
-                let light_ray = Ray3 {
-                    start: intersection.point,
-                    dir: light - intersection.point
-                };
+                    let can_see_light = match scene.intersect(light_ray) {
+                        Some(light_intersection) => {
+                            light_intersection.time > 1.
+                        },
+                        None => true
+                    };
 
-                let can_see_light = match scene.intersect(light_ray) {
-                    Some(light_intersection) => {
-                        light_intersection.time > 1.
-                    },
-                    None => true
-                };
+                    if can_see_light {
+                        let light_strength = 10.0 / light_ray.dir.mag2();
+                        let scale = (intersection.normal.mag2() * light_ray.dir.mag2()).sqrt();
+                        total_light += light_strength * intersection.normal.dot(light_ray.dir) / scale;
+                    }
 
-                if can_see_light {
-                    let light_strength = 10.0 / light_ray.dir.mag2();
-                    let scale = (intersection.normal.mag2() * light_ray.dir.mag2()).sqrt();
-                    clamp(light_strength * intersection.normal.dot(light_ray.dir) / scale)
+                    let cand_dir = rand_sphere(&mut rng);
+                    let dir = if cand_dir.dot(intersection.normal) < 0. {
+                        -cand_dir
+                    } else {
+                        cand_dir
+                    };
+                    ray = Ray3 {
+                        start: intersection.point,
+                        dir: dir
+                    }
                 } else {
-                    0.
+                    break;
                 }
-            },
-            None => 0.
-        };
+            }
+        }
 
         // Create an 8bit pixel of type Luma and value i
         // and assign in to the pixel at position (x, y)
-        *pixel = image::Luma([(value*255.) as u8]);
+        *pixel = image::Luma([(clamp(total_light / rays_per_pixel as f32)*255.) as u8]);
     }
 
     // Save the image as “out.png”
