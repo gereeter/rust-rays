@@ -58,6 +58,28 @@ impl Scene for Sphere {
     }
 }
 
+struct Plane {
+    origin: Point3,
+    normal: Vec3
+}
+
+impl Scene for Plane {
+    fn intersect(&self, ray: Ray3) -> Option<Intersection> {
+        let divisor = ray.dir.dot(self.normal);
+        if divisor == 0. {
+            None
+        } else {
+            let offset = ray.start - self.origin;
+            let time = -offset.dot(self.normal) / divisor;
+            if time > 0. {
+                Some(Intersection { time: time, normal: self.normal })
+            } else {
+                None
+            }
+        }
+    }
+}
+
 impl<A: Scene, B: Scene> Scene for (A, B) {
     fn intersect(&self, ray: Ray3) -> Option<Intersection> {
         match self.0.intersect(ray) {
@@ -79,14 +101,22 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
 
 fn main() {
     let scene = (
-        Sphere {
+        (Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
             radius: 0.3
         },
         Sphere {
             center: Point3::new(1.5, 0.0, 3.5),
             radius: 0.35
-        }
+        }),
+        (Plane {
+            origin: Point3::new(0.0, 0.0, 8.0),
+            normal: Vec3::new(2.0, 0.0, -1.0)
+        },
+        Plane {
+            origin: Point3::new(0.0, 0.0, 8.0),
+            normal: Vec3::new(-1.0, 0.0, -2.0)
+        })
     );
 
     let imgx = 800;
