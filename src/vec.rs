@@ -1,4 +1,4 @@
-use std::ops::{Add, Sub, Mul};
+use std::ops::{Add, Sub, Mul, Div};
 
 #[derive(Copy)]
 pub struct Vec3 {
@@ -55,6 +55,19 @@ impl Mul<f32> for Vec3 {
                 self.vals[0] * other,
                 self.vals[1] * other,
                 self.vals[2] * other
+            ]
+        }
+    }
+}
+
+impl Div<f32> for Vec3 {
+    type Output = Vec3;
+    fn div(self, other: f32) -> Vec3 {
+        Vec3 {
+            vals: [
+                self.vals[0] / other,
+                self.vals[1] / other,
+                self.vals[2] / other
             ]
         }
     }

@@ -3,6 +3,7 @@
 extern crate image;
 
 use std::old_io::File;
+use std::num::Float;
 
 use point::Point3;
 use vec::Vec3;
@@ -21,8 +22,13 @@ struct Scene {
     radius: f32
 }
 
+struct Intersection {
+    time: f32,
+    normal: Vec3
+}
+
 impl Scene {
-    fn intersect(&self, ray: Ray3) -> Option<()> {
+    fn intersect(&self, ray: Ray3) -> Option<Intersection> {
         let offset = ray.start - self.center;
 
         let a = ray.dir.mag2();
@@ -31,7 +37,17 @@ impl Scene {
 
         let descrim = b*b - 4.*a*c;
         if descrim > 0. {
-            Some(())
+            let t1 = (-b - descrim.sqrt()) / (2. * a);
+            let t2 = (-b + descrim.sqrt()) / (2. * a);
+            if t1 > 0. {
+                let normal = ray.start + ray.dir * t1 - self.center;
+                Some(Intersection { time: t1, normal: normal })
+            } else if t2 > 0. {
+                let normal = ray.start + ray.dir * t2 - self.center;
+                Some(Intersection { time: t2, normal: normal })
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -43,7 +59,7 @@ impl Scene {
 
 fn main() {
     let scene = Scene {
-        center: Point3::new(0.5, 0.0, 3.0),
+        center: Point3::new(1.5, 0.0, 5.0),
         radius: 0.3
     };
 
@@ -62,12 +78,15 @@ fn main() {
         let cx = x as f32 * scalex - 2.0;
 
         let ray = Ray3 {
-            start: Point3::new(0., 0., 0.),
-            dir: Vec3::new(cx, cy, 1.0)
+            start: Point3::new(0., 0., -8.0),
+            dir: Vec3::new(cx, cy, 8.0)
         };
 
         let value: f32 = match scene.intersect(ray) {
-            Some(_) => 1.,
+            Some(intersection) => {
+                let scale = -(intersection.normal.mag2() * ray.dir.mag2()).sqrt();
+                intersection.normal.dot(ray.dir) / scale
+            },
             None => 0.
         };
 
