@@ -1,0 +1,13 @@
+[package]
+
+name = "rays"
+version = "0.0.0"
+authors = [ "Jonathan S <gereeter@gmail.com>" ]
+
+[dependencies]
+image = "~0.2.0"
+num = "0.1.12"
+
+[[bin]]
+
+name = "rays"
