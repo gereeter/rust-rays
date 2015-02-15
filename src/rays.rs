@@ -19,6 +19,7 @@ struct Ray3 {
 
 struct Intersection {
     time: f32,
+    point: Point3,
     normal: Vec3
 }
 
@@ -44,11 +45,21 @@ impl Scene for Sphere {
             let t1 = (-b - descrim.sqrt()) / (2. * a);
             let t2 = (-b + descrim.sqrt()) / (2. * a);
             if t1 > 0. {
-                let normal = ray.start + ray.dir * t1 - self.center;
-                Some(Intersection { time: t1, normal: normal })
+                let p = ray.start + ray.dir * t1;
+                let normal = p - self.center;
+                Some(Intersection {
+                    time: t1,
+                    point: p,
+                    normal: normal
+                })
             } else if t2 > 0. {
-                let normal = ray.start + ray.dir * t2 - self.center;
-                Some(Intersection { time: t2, normal: normal })
+                let p = ray.start + ray.dir * t2;
+                let normal = p - self.center;
+                Some(Intersection {
+                    time: t2,
+                    point: p,
+                    normal: normal
+                })
             } else {
                 None
             }
@@ -72,7 +83,11 @@ impl Scene for Plane {
             let offset = ray.start - self.origin;
             let time = -offset.dot(self.normal) / divisor;
             if time > 0. {
-                Some(Intersection { time: time, normal: self.normal })
+                Some(Intersection {
+                    time: time,
+                    point: ray.start + ray.dir * time,
+                    normal: self.normal
+                })
             } else {
                 None
             }
@@ -98,6 +113,15 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
     }
 }
 
+fn clamp(val: f32) -> f32 {
+    if val > 1. {
+        1.
+    } else if val < 0. {
+        0.
+    } else {
+        val
+    }
+}
 
 fn main() {
     let scene = (
@@ -118,6 +142,7 @@ fn main() {
             normal: Vec3::new(-1.0, 0.0, -2.0)
         })
     );
+    let light = Point3::new(1.0, -1.5, 0.5);
 
     let imgx = 800;
     let imgy = 800;
@@ -130,7 +155,7 @@ fn main() {
 
     // Iterate over the coordiantes and pixels of the image
     for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
-        let cy = y as f32 * scaley - 2.0;
+        let cy = -(y as f32 * scaley - 2.0);
         let cx = x as f32 * scalex - 2.0;
 
         let ray = Ray3 {
@@ -140,8 +165,10 @@ fn main() {
 
         let value: f32 = match scene.intersect(ray) {
             Some(intersection) => {
-                let scale = -(intersection.normal.mag2() * ray.dir.mag2()).sqrt();
-                intersection.normal.dot(ray.dir) / scale
+                let light_dir = light - intersection.point;
+                let light_strength = 10.0 / light_dir.mag2();
+                let scale = (intersection.normal.mag2() * light_dir.mag2()).sqrt();
+                clamp(light_strength * intersection.normal.dot(light_dir) / scale)
             },
             None => 0.
         };
