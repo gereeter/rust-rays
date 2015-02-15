@@ -15,6 +15,7 @@ use vec::Vec3;
 mod vec;
 mod point;
 
+// TODO: Improve edges
 const EPS: f32 = 0.00005;
 
 #[derive(Copy)]
@@ -41,6 +42,10 @@ struct Sphere {
 impl Scene for Sphere {
     fn intersect(&self, ray: Ray3) -> Option<Intersection> {
         let offset = ray.start - self.center;
+        // TODO: Improve edges
+        if offset.mag2() < self.radius*self.radius {
+            return None;
+        }
 
         let a = ray.dir.mag2();
         let b = 2. * offset.dot(ray.dir);
@@ -140,7 +145,7 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     let num_bounces = 10;
-    let rays_per_pixel = 10;
+    let rays_per_pixel = 50;
     let scene = (
         (Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
