@@ -6,6 +6,7 @@ authors = [ "Jonathan S <gereeter@gmail.com>" ]
 
 [dependencies]
 image = "~0.2.0"
+rand = "0.1.2"
 
 [[bin]]
 
