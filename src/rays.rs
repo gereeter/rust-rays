@@ -17,17 +17,21 @@ struct Ray3 {
     dir: Vec3
 }
 
-struct Scene {
-    center: Point3,
-    radius: f32
-}
-
 struct Intersection {
     time: f32,
     normal: Vec3
 }
 
-impl Scene {
+trait Scene {
+    fn intersect(&self, ray: Ray3) -> Option<Intersection>;
+}
+
+struct Sphere {
+    center: Point3,
+    radius: f32
+}
+
+impl Scene for Sphere {
     fn intersect(&self, ray: Ray3) -> Option<Intersection> {
         let offset = ray.start - self.center;
 
@@ -54,14 +58,36 @@ impl Scene {
     }
 }
 
-
+impl<A: Scene, B: Scene> Scene for (A, B) {
+    fn intersect(&self, ray: Ray3) -> Option<Intersection> {
+        match self.0.intersect(ray) {
+            Some(ai) => {
+                match self.1.intersect(ray) {
+                    Some(bi) => if ai.time < bi.time {
+                        Some(ai)
+                    } else {
+                        Some(bi)
+                    },
+                    None => Some(ai)
+                }
+            },
+            None => self.1.intersect(ray)
+        }
+    }
+}
 
 
 fn main() {
-    let scene = Scene {
-        center: Point3::new(1.5, 0.0, 5.0),
-        radius: 0.3
-    };
+    let scene = (
+        Sphere {
+            center: Point3::new(1.2, 0.0, 5.0),
+            radius: 0.3
+        },
+        Sphere {
+            center: Point3::new(1.5, 0.0, 3.5),
+            radius: 0.35
+        }
+    );
 
     let imgx = 800;
     let imgy = 800;
