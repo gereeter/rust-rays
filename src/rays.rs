@@ -15,23 +15,24 @@ use vec::Vec3;
 mod vec;
 mod point;
 
-// TODO: Improve edges
-const EPS: f32 = 0.00005;
-
 #[derive(Copy)]
 struct Ray3 {
     start: Point3,
     dir: Vec3
 }
 
-struct Intersection {
+struct Intersection<ObjectId> {
     time: f32,
     point: Point3,
-    normal: Vec3
+    normal: Vec3,
+    object: ObjectId
 }
 
 trait Scene {
-    fn intersect(&self, ray: Ray3) -> Option<Intersection>;
+    // TODO: Should this have a "not present" id?
+    type ObjectId: Copy;
+
+    fn intersect(&self, ray: Ray3, previous: Option<Self::ObjectId>) -> Option<Intersection<Self::ObjectId>>;
 }
 
 struct Sphere {
@@ -40,12 +41,13 @@ struct Sphere {
 }
 
 impl Scene for Sphere {
-    fn intersect(&self, ray: Ray3) -> Option<Intersection> {
-        let offset = ray.start - self.center;
-        // TODO: Improve edges
-        if offset.mag2() < self.radius*self.radius {
+    type ObjectId = ();
+    fn intersect(&self, ray: Ray3, previous: Option<()>) -> Option<Intersection<()>> {
+        if let Some(()) = previous {
             return None;
         }
+
+        let offset = ray.start - self.center;
 
         let a = ray.dir.mag2();
         let b = 2. * offset.dot(ray.dir);
@@ -55,21 +57,23 @@ impl Scene for Sphere {
         if descrim > 0. {
             let t1 = (-b - descrim.sqrt()) / (2. * a);
             let t2 = (-b + descrim.sqrt()) / (2. * a);
-            if t1 > EPS {
+            if t1 > 0. {
                 let p = ray.start + ray.dir * t1;
                 let normal = p - self.center;
                 Some(Intersection {
                     time: t1,
                     point: p,
-                    normal: normal
+                    normal: normal,
+                    object: ()
                 })
-            } else if t2 > EPS {
+            } else if t2 > 0. {
                 let p = ray.start + ray.dir * t2;
                 let normal = p - self.center;
                 Some(Intersection {
                     time: t2,
                     point: p,
-                    normal: normal
+                    normal: normal,
+                    object: ()
                 })
             } else {
                 None
@@ -86,18 +90,24 @@ struct Plane {
 }
 
 impl Scene for Plane {
-    fn intersect(&self, ray: Ray3) -> Option<Intersection> {
+    type ObjectId = ();
+    fn intersect(&self, ray: Ray3, previous: Option<()>) -> Option<Intersection<()>> {
+        if let Some(()) = previous {
+            return None;
+        }
+
         let divisor = ray.dir.dot(self.normal);
         if divisor == 0. {
             None
         } else {
             let offset = ray.start - self.origin;
             let time = -offset.dot(self.normal) / divisor;
-            if time > EPS {
+            if time > 0. {
                 Some(Intersection {
                     time: time,
                     point: ray.start + ray.dir * time,
-                    normal: self.normal
+                    normal: self.normal,
+                    object: ()
                 })
             } else {
                 None
@@ -106,20 +116,56 @@ impl Scene for Plane {
     }
 }
 
+#[derive(Copy)]
+enum Choice<A, B> {
+    OptA(A),
+    OptB(B)
+}
+
 impl<A: Scene, B: Scene> Scene for (A, B) {
-    fn intersect(&self, ray: Ray3) -> Option<Intersection> {
-        match self.0.intersect(ray) {
+    type ObjectId = Choice<A::ObjectId, B::ObjectId>;
+    fn intersect(&self, ray: Ray3, previous: Option<Choice<A::ObjectId, B::ObjectId>>) -> Option<Intersection<Choice<A::ObjectId, B::ObjectId>>> {
+        let (aid, bid) = match previous {
+            None => (None, None),
+            Some(Choice::OptA(aid)) => (Some(aid), None),
+            Some(Choice::OptB(bid)) => (None, Some(bid))
+        };
+
+        match self.0.intersect(ray, aid) {
             Some(ai) => {
-                match self.1.intersect(ray) {
+                match self.1.intersect(ray, bid) {
                     Some(bi) => if ai.time < bi.time {
-                        Some(ai)
+                        Some(Intersection {
+                            time: ai.time,
+                            normal: ai.normal,
+                            point: ai.point,
+                            object: Choice::OptA(ai.object)
+                        })
                     } else {
-                        Some(bi)
+                        Some(Intersection {
+                            time: bi.time,
+                            normal: bi.normal,
+                            point: bi.point,
+                            object: Choice::OptB(bi.object)
+                        })
                     },
-                    None => Some(ai)
+                    None => Some(Intersection {
+                        time: ai.time,
+                        normal: ai.normal,
+                        point: ai.point,
+                        object: Choice::OptA(ai.object)
+                    })
                 }
             },
-            None => self.1.intersect(ray)
+            None => match self.1.intersect(ray, bid) {
+                Some(bi) => Some(Intersection {
+                    time: bi.time,
+                    normal: bi.normal,
+                    point: bi.point,
+                    object: Choice::OptB(bi.object)
+                }),
+                None => None
+            }
         }
     }
 }
@@ -186,15 +232,18 @@ fn main() {
                 start: Point3::new(0., 0., -8.0),
                 dir: Vec3::new(cx, cy, 8.0)
             };
+            let mut prev_object = None;
             let mut strength = 1.;
             for _ in 0..num_bounces {
-                if let Some(intersection) = scene.intersect(ray) {
+                if let Some(intersection) = scene.intersect(ray, prev_object) {
+                    prev_object = Some(intersection.object);
+
                     let light_ray = Ray3 {
                         start: intersection.point,
                         dir: light - intersection.point
                     };
 
-                    let can_see_light = match scene.intersect(light_ray) {
+                    let can_see_light = match scene.intersect(light_ray, prev_object) {
                         Some(light_intersection) => {
                             light_intersection.time > 1.
                         },
