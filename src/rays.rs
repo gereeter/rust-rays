@@ -3,91 +3,18 @@
 extern crate image;
 
 use std::old_io::File;
-use std::ops::{Add, Mul, Sub};
 
-#[derive(Copy)]
-struct Vec3 {
-    vals: [f32; 3]
-}
+use point::Point3;
+use vec::Vec3;
 
-impl Add<Vec3> for Vec3 {
-    type Output = Vec3;
-    fn add(self, other: Vec3) -> Vec3 {
-        Vec3 {
-            vals: [
-                self.vals[0] + other.vals[0],
-                self.vals[1] + other.vals[1],
-                self.vals[2] + other.vals[2]
-            ]
-        }
-    }
-}
-
-impl Sub<Vec3> for Vec3 {
-    type Output = Vec3;
-    fn sub(self, other: Vec3) -> Vec3 {
-        Vec3 {
-            vals: [
-                self.vals[0] - other.vals[0],
-                self.vals[1] - other.vals[1],
-                self.vals[2] - other.vals[2]
-            ]
-        }
-    }
-}
-
-impl Mul<f32> for Vec3 {
-    type Output = Vec3;
-    fn mul(self, other: f32) -> Vec3 {
-        Vec3 {
-            vals: [
-                self.vals[0] * other,
-                self.vals[1] * other,
-                self.vals[2] * other
-            ]
-        }
-    }
-}
-
-impl Vec3 {
-    fn dot(self, other: Vec3) -> f32 {
-        self.vals[0] * other.vals[0] + self.vals[1] * other.vals[1] + self.vals[2] * other.vals[2]
-    }
-
-    fn mag2(self) -> f32 {
-        self.dot(self)
-    }
-}
-
-#[derive(Copy)]
-struct Point3 {
-    inner: Vec3
-}
-
-impl Sub<Point3> for Point3 {
-    type Output = Vec3;
-    fn sub(self, other: Point3) -> Vec3 {
-        self.inner - other.inner
-    }
-}
-
-impl Add<Vec3> for Point3 {
-    type Output = Point3;
-    fn add(self, other: Vec3) -> Point3 {
-        Point3 { inner: self.inner + other }
-    }
-}
-
-
+mod vec;
+mod point;
 
 #[derive(Copy)]
 struct Ray3 {
     start: Point3,
     dir: Vec3
 }
-
-
-
 
 struct Scene {
     center: Point3,
@@ -116,7 +43,7 @@ impl Scene {
 
 fn main() {
     let scene = Scene {
-        center: Point3 { inner: Vec3 { vals: [0.5, 0.0, 3.0] } },
+        center: Point3::new(0.5, 0.0, 3.0),
         radius: 0.3
     };
 
@@ -135,8 +62,8 @@ fn main() {
         let cx = x as f32 * scalex - 2.0;
 
         let ray = Ray3 {
-            start: Point3 { inner: Vec3 { vals: [0., 0., 0.] } },
-            dir: Vec3 { vals: [cx, cy, 1.0] }
+            start: Point3::new(0., 0., 0.),
+            dir: Vec3::new(cx, cy, 1.0)
         };
 
         let value: f32 = match scene.intersect(ray) {
