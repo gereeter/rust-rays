@@ -11,6 +11,8 @@ use vec::Vec3;
 mod vec;
 mod point;
 
+const EPS: f32 = 0.00005;
+
 #[derive(Copy)]
 struct Ray3 {
     start: Point3,
@@ -44,7 +46,7 @@ impl Scene for Sphere {
         if descrim > 0. {
             let t1 = (-b - descrim.sqrt()) / (2. * a);
             let t2 = (-b + descrim.sqrt()) / (2. * a);
-            if t1 > 0. {
+            if t1 > EPS {
                 let p = ray.start + ray.dir * t1;
                 let normal = p - self.center;
                 Some(Intersection {
@@ -52,7 +54,7 @@ impl Scene for Sphere {
                     point: p,
                     normal: normal
                 })
-            } else if t2 > 0. {
+            } else if t2 > EPS {
                 let p = ray.start + ray.dir * t2;
                 let normal = p - self.center;
                 Some(Intersection {
@@ -82,7 +84,7 @@ impl Scene for Plane {
         } else {
             let offset = ray.start - self.origin;
             let time = -offset.dot(self.normal) / divisor;
-            if time > 0. {
+            if time > EPS {
                 Some(Intersection {
                     time: time,
                     point: ray.start + ray.dir * time,
@@ -165,10 +167,25 @@ fn main() {
 
         let value: f32 = match scene.intersect(ray) {
             Some(intersection) => {
-                let light_dir = light - intersection.point;
-                let light_strength = 10.0 / light_dir.mag2();
-                let scale = (intersection.normal.mag2() * light_dir.mag2()).sqrt();
-                clamp(light_strength * intersection.normal.dot(light_dir) / scale)
+                let light_ray = Ray3 {
+                    start: intersection.point,
+                    dir: light - intersection.point
+                };
+
+                let can_see_light = match scene.intersect(light_ray) {
+                    Some(light_intersection) => {
+                        light_intersection.time > 1.
+                    },
+                    None => true
+                };
+
+                if can_see_light {
+                    let light_strength = 10.0 / light_ray.dir.mag2();
+                    let scale = (intersection.normal.mag2() * light_ray.dir.mag2()).sqrt();
+                    clamp(light_strength * intersection.normal.dot(light_ray.dir) / scale)
+                } else {
+                    0.
+                }
             },
             None => 0.
         };
