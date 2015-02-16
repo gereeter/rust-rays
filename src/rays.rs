@@ -247,7 +247,7 @@ fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
 }
 
 fn main() {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::weak_rng();
 
     let rays_per_pixel = 100;
     let scene: (&[Sphere], &[Plane]) = (
