@@ -30,6 +30,18 @@ struct Intersection<ObjectId> {
     object: ObjectId
 }
 
+impl<ObjectId> Intersection<ObjectId> {
+    fn map_obj<NewObjectId, F: FnOnce(ObjectId) -> NewObjectId>(self, func: F) -> Intersection<NewObjectId> {
+        Intersection {
+            time: self.time,
+            point: self.point,
+            normal: self.normal,
+            emitted: self.emitted,
+            object: func(self.object)
+        }
+    }
+}
+
 trait Scene {
     // TODO: Should this have a "not present" id?
     type ObjectId: Copy;
@@ -142,45 +154,15 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
             Some(Choice::OptB(bid)) => (None, Some(bid))
         };
 
-        match self.0.intersect(ray, aid) {
-            Some(ai) => {
-                match self.1.intersect(ray, bid) {
-                    Some(bi) => if ai.time < bi.time {
-                        Some(Intersection {
-                            time: ai.time,
-                            normal: ai.normal,
-                            point: ai.point,
-                            emitted: ai.emitted,
-                            object: Choice::OptA(ai.object)
-                        })
-                    } else {
-                        Some(Intersection {
-                            time: bi.time,
-                            normal: bi.normal,
-                            point: bi.point,
-                            emitted: bi.emitted,
-                            object: Choice::OptB(bi.object)
-                        })
-                    },
-                    None => Some(Intersection {
-                        time: ai.time,
-                        normal: ai.normal,
-                        point: ai.point,
-                        emitted: ai.emitted,
-                        object: Choice::OptA(ai.object)
-                    })
-                }
+        match (self.0.intersect(ray, aid), self.1.intersect(ray, bid)) {
+            (Some(ai), Some(bi)) => if ai.time < bi.time {
+                Some(ai.map_obj(Choice::OptA))
+            } else {
+                Some(bi.map_obj(Choice::OptB))
             },
-            None => match self.1.intersect(ray, bid) {
-                Some(bi) => Some(Intersection {
-                    time: bi.time,
-                    normal: bi.normal,
-                    point: bi.point,
-                    emitted: bi.emitted,
-                    object: Choice::OptB(bi.object)
-                }),
-                None => None
-            }
+            (Some(ai), None) => Some(ai.map_obj(Choice::OptA)),
+            (None, Some(bi)) => Some(bi.map_obj(Choice::OptB)),
+            (None, None) => None
         }
     }
 }
@@ -207,13 +189,7 @@ impl<T: Scene> Scene for [T] {
                 };
 
                 if new_best {
-                    best = Some(Intersection {
-                        time: intersection.time,
-                        normal: intersection.normal,
-                        point: intersection.point,
-                        emitted: intersection.emitted,
-                        object: (id, intersection.object)
-                    });
+                    best = Some(intersection.map_obj(|obj| (id, obj)));
                 }
             }
         }
