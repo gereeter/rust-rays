@@ -185,6 +185,50 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
     }
 }
 
+impl<T: Scene> Scene for [T] {
+    type ObjectId = (usize, T::ObjectId);
+    fn intersect(&self, ray: Ray3, previous: Option<(usize, T::ObjectId)>) -> Option<Intersection<(usize, T::ObjectId)>> {
+        let mut best: Option<Intersection<(usize, T::ObjectId)>> = None;
+
+        for (id, obj) in self.iter().enumerate() {
+            let prev = match previous {
+                Some((prev_index, prev_obj)) => if prev_index == id {
+                    Some(prev_obj)
+                } else {
+                    None
+                },
+                None => None
+            };
+
+            if let Some(intersection) = obj.intersect(ray, prev) {
+                let new_best = match best {
+                    Some(ref cur_best) => intersection.time < cur_best.time,
+                    None => true
+                };
+
+                if new_best {
+                    best = Some(Intersection {
+                        time: intersection.time,
+                        normal: intersection.normal,
+                        point: intersection.point,
+                        emitted: intersection.emitted,
+                        object: (id, intersection.object)
+                    });
+                }
+            }
+        }
+
+        best
+    }
+}
+
+impl<'a, T: ?Sized + Scene> Scene for &'a T {
+    type ObjectId = T::ObjectId;
+    fn intersect(&self, ray: Ray3, previous: Option<T::ObjectId>) -> Option<Intersection<T::ObjectId>> {
+        (*self).intersect(ray, previous)
+    }
+}
+
 fn clamp(val: f32) -> f32 {
     if val > 1. {
         1.
@@ -206,8 +250,8 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     let rays_per_pixel = 100;
-    let scene = (
-        ((Sphere {
+    let scene: (&[Sphere], &[Plane]) = (
+        &[Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
             radius: 0.3,
             material: Material { emitted_radiance: 0. }
@@ -216,13 +260,13 @@ fn main() {
             center: Point3::new(1.5, 0.0, 3.5),
             radius: 0.35,
             material: Material { emitted_radiance: 0. }
-        }),
+        },
         Sphere {
             center: Point3::new(1.0, 2.5, 0.5),
             radius: 1.0,
             material: Material { emitted_radiance: 20. }
-        }),
-        ((Plane {
+        }],
+        &[Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(2.0, 0.0, -1.0),
             material: Material { emitted_radiance: 0. }
@@ -231,8 +275,8 @@ fn main() {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(-1.0, 0.0, -2.0),
             material: Material { emitted_radiance: 0. }
-        }),
-        (Plane {
+        },
+        Plane {
             origin: Point3::new(0.0, 2.0, 0.0),
             normal: Vec3::new(0.0, -1.0, 0.0),
             material: Material { emitted_radiance: 0. }
@@ -241,7 +285,7 @@ fn main() {
             origin: Point3::new(0.0, -3.0, 0.0),
             normal: Vec3::new(0.0, 1.0, 0.0),
             material: Material { emitted_radiance: 0. }
-        }))
+        }]
     );
 
     let imgx = 800;
