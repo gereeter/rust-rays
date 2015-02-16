@@ -26,6 +26,7 @@ struct Intersection<ObjectId> {
     time: f32,
     point: Point3,
     normal: Vec3,
+    emitted: f32,
     object: ObjectId
 }
 
@@ -36,9 +37,14 @@ trait Scene {
     fn intersect(&self, ray: Ray3, previous: Option<Self::ObjectId>) -> Option<Intersection<Self::ObjectId>>;
 }
 
+struct Material {
+    emitted_radiance: f32
+}
+
 struct Sphere {
     center: Point3,
-    radius: f32
+    radius: f32,
+    material: Material
 }
 
 impl Scene for Sphere {
@@ -65,6 +71,7 @@ impl Scene for Sphere {
                     time: t1,
                     point: p,
                     normal: normal,
+                    emitted: self.material.emitted_radiance,
                     object: ()
                 })
             } else if t2 > 0. {
@@ -74,6 +81,7 @@ impl Scene for Sphere {
                     time: t2,
                     point: p,
                     normal: normal,
+                    emitted: self.material.emitted_radiance,
                     object: ()
                 })
             } else {
@@ -87,7 +95,8 @@ impl Scene for Sphere {
 
 struct Plane {
     origin: Point3,
-    normal: Vec3
+    normal: Vec3,
+    material: Material
 }
 
 impl Scene for Plane {
@@ -108,6 +117,7 @@ impl Scene for Plane {
                     time: time,
                     point: ray.start + ray.dir * time,
                     normal: self.normal,
+                    emitted: self.material.emitted_radiance,
                     object: ()
                 })
             } else {
@@ -140,6 +150,7 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
                             time: ai.time,
                             normal: ai.normal,
                             point: ai.point,
+                            emitted: ai.emitted,
                             object: Choice::OptA(ai.object)
                         })
                     } else {
@@ -147,6 +158,7 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
                             time: bi.time,
                             normal: bi.normal,
                             point: bi.point,
+                            emitted: bi.emitted,
                             object: Choice::OptB(bi.object)
                         })
                     },
@@ -154,6 +166,7 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
                         time: ai.time,
                         normal: ai.normal,
                         point: ai.point,
+                        emitted: ai.emitted,
                         object: Choice::OptA(ai.object)
                     })
                 }
@@ -163,6 +176,7 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
                     time: bi.time,
                     normal: bi.normal,
                     point: bi.point,
+                    emitted: bi.emitted,
                     object: Choice::OptB(bi.object)
                 }),
                 None => None
@@ -191,34 +205,44 @@ fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
 fn main() {
     let mut rng = rand::thread_rng();
 
-    let rays_per_pixel = 50;
+    let rays_per_pixel = 100;
     let scene = (
-        (Sphere {
+        ((Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
-            radius: 0.3
+            radius: 0.3,
+            material: Material { emitted_radiance: 0. }
         },
         Sphere {
             center: Point3::new(1.5, 0.0, 3.5),
-            radius: 0.35
+            radius: 0.35,
+            material: Material { emitted_radiance: 0. }
+        }),
+        Sphere {
+            center: Point3::new(1.0, 2.5, 0.5),
+            radius: 1.0,
+            material: Material { emitted_radiance: 20. }
         }),
         ((Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
-            normal: Vec3::new(2.0, 0.0, -1.0)
+            normal: Vec3::new(2.0, 0.0, -1.0),
+            material: Material { emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
-            normal: Vec3::new(-1.0, 0.0, -2.0)
+            normal: Vec3::new(-1.0, 0.0, -2.0),
+            material: Material { emitted_radiance: 0. }
         }),
         (Plane {
             origin: Point3::new(0.0, 2.0, 0.0),
-            normal: Vec3::new(0.0, -1.0, 0.0)
+            normal: Vec3::new(0.0, -1.0, 0.0),
+            material: Material { emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, -3.0, 0.0),
-            normal: Vec3::new(0.0, 1.0, 0.0)
+            normal: Vec3::new(0.0, 1.0, 0.0),
+            material: Material { emitted_radiance: 0. }
         }))
     );
-    let light = Point3::new(1.0, -1.5, 0.5);
 
     let imgx = 800;
     let imgy = 800;
@@ -241,27 +265,12 @@ fn main() {
                 dir: Vec3::new(cx, cy, 8.0)
             };
             let mut prev_object = None;
+            let mut scale = 1.;
             loop {
                 if let Some(intersection) = scene.intersect(ray, prev_object) {
                     prev_object = Some(intersection.object);
 
-                    let light_ray = Ray3 {
-                        start: intersection.point,
-                        dir: light - intersection.point
-                    };
-
-                    let can_see_light = match scene.intersect(light_ray, prev_object) {
-                        Some(light_intersection) => {
-                            light_intersection.time > 1.
-                        },
-                        None => true
-                    };
-
-                    if can_see_light {
-                        let light_strength = 10.0 / light_ray.dir.mag2();
-                        let scale = (intersection.normal.mag2() * light_ray.dir.mag2()).sqrt();
-                        total_light += light_strength * intersection.normal.dot(light_ray.dir) / scale;
-                    }
+                    total_light += scale * intersection.emitted;
 
                     let cand_dir = rand_sphere(&mut rng);
                     let dir = if cand_dir.dot(intersection.normal) < 0. {
@@ -274,7 +283,10 @@ fn main() {
                         dir: dir
                     };
 
-                    if rng.next_f32() > dir.dot(intersection.normal) / intersection.normal.mag2().sqrt() {
+                    let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
+                    if scale > 0.2 {
+                        scale *= p;
+                    } else if rng.next_f32() > p {
                         break;
                     }
                 } else {
