@@ -8,6 +8,7 @@ use std::num::Float;
 use std::f32::consts::PI_2;
 
 use rand::distributions::IndependentSample;
+use rand::Rng;
 
 use point::Point3;
 use vec::Vec3;
@@ -190,7 +191,6 @@ fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
 fn main() {
     let mut rng = rand::thread_rng();
 
-    let num_bounces = 10;
     let rays_per_pixel = 50;
     let scene = (
         (Sphere {
@@ -201,14 +201,22 @@ fn main() {
             center: Point3::new(1.5, 0.0, 3.5),
             radius: 0.35
         }),
-        (Plane {
+        ((Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(2.0, 0.0, -1.0)
         },
         Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(-1.0, 0.0, -2.0)
-        })
+        }),
+        (Plane {
+            origin: Point3::new(0.0, 2.0, 0.0),
+            normal: Vec3::new(0.0, -1.0, 0.0)
+        },
+        Plane {
+            origin: Point3::new(0.0, -3.0, 0.0),
+            normal: Vec3::new(0.0, 1.0, 0.0)
+        }))
     );
     let light = Point3::new(1.0, -1.5, 0.5);
 
@@ -233,8 +241,7 @@ fn main() {
                 dir: Vec3::new(cx, cy, 8.0)
             };
             let mut prev_object = None;
-            let mut strength = 1.;
-            for _ in 0..num_bounces {
+            loop {
                 if let Some(intersection) = scene.intersect(ray, prev_object) {
                     prev_object = Some(intersection.object);
 
@@ -253,7 +260,7 @@ fn main() {
                     if can_see_light {
                         let light_strength = 10.0 / light_ray.dir.mag2();
                         let scale = (intersection.normal.mag2() * light_ray.dir.mag2()).sqrt();
-                        total_light += strength * light_strength * intersection.normal.dot(light_ray.dir) / scale;
+                        total_light += light_strength * intersection.normal.dot(light_ray.dir) / scale;
                     }
 
                     let cand_dir = rand_sphere(&mut rng);
@@ -266,7 +273,10 @@ fn main() {
                         start: intersection.point,
                         dir: dir
                     };
-                    strength *= dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
+
+                    if rng.next_f32() > dir.dot(intersection.normal) / intersection.normal.mag2().sqrt() {
+                        break;
+                    }
                 } else {
                     break;
                 }
