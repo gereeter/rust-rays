@@ -26,8 +26,8 @@ struct Intersection<ObjectId> {
     time: f32,
     point: Point3,
     normal: Vec3,
-    // TODO: Use emitted, distribution of directions
-    material: Material,
+    emitted: f32,
+    reflection: Reflection,
     object: ObjectId
 }
 
@@ -37,7 +37,8 @@ impl<ObjectId> Intersection<ObjectId> {
             time: self.time,
             point: self.point,
             normal: self.normal,
-            material: self.material,
+            emitted: self.emitted,
+            reflection: self.reflection,
             object: func(self.object)
         }
     }
@@ -52,8 +53,14 @@ trait Scene {
 
 #[derive(Copy)]
 struct Material {
-    specularity: f32,
+    reflection: Reflection,
     emitted_radiance: f32
+}
+
+#[derive(Copy)]
+enum Reflection {
+    Diffuse,
+    Specular
 }
 
 struct Sphere {
@@ -62,10 +69,16 @@ struct Sphere {
     material: Material
 }
 
+#[derive(Copy)]
+enum SphereSource {
+    Inside,
+    Outside
+}
+
 impl Scene for Sphere {
-    type ObjectId = ();
-    fn intersect(&self, ray: Ray3, previous: Option<()>) -> Option<Intersection<()>> {
-        if let Some(()) = previous {
+    type ObjectId = SphereSource;
+    fn intersect(&self, ray: Ray3, previous: Option<SphereSource>) -> Option<Intersection<SphereSource>> {
+        if let Some(SphereSource::Outside) = previous {
             return None;
         }
 
@@ -83,22 +96,27 @@ impl Scene for Sphere {
         let time = {
             let t1 = (-b - descrim.sqrt()) / (2. * a);
             let t2 = (-b + descrim.sqrt()) / (2. * a);
-            if t1 > 0. {
+            if previous.is_none() && t1 > 0. {
                 t1
             } else if t2 > 0. {
                 t2
             } else {
-                return None
+                return None;
             }
-        }
+        };
+
         let p = ray.start + ray.dir * time;
         let normal = p - self.center;
         Some(Intersection {
             time: time,
             point: p,
             normal: normal,
-            material: self.material,
-            object: ()
+            emitted: self.material.emitted_radiance,
+            reflection: self.material.reflection,
+            object: match previous {
+                None => SphereSource::Outside,
+                Some(source) => source
+            }
         })
     }
 }
@@ -127,7 +145,8 @@ impl Scene for Plane {
                     time: time,
                     point: ray.start + ray.dir * time,
                     normal: self.normal,
-                    material: self.material,
+                    emitted: self.material.emitted_radiance,
+                    reflection: self.material.reflection,
                     object: ()
                 })
             } else {
@@ -228,47 +247,47 @@ fn main() {
         &[Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
             radius: 0.3,
-            material: Material { specularity: 0., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
         },
         Sphere {
             center: Point3::new(1.5, 0.0, 3.5),
             radius: 0.35,
-            material: Material { specularity: 0., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
         },
         Sphere {
             center: Point3::new(1.0, 2.5, 0.5),
             radius: 1.0,
-            material: Material { specularity: 0., emitted_radiance: 20. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 20. }
         },
         Sphere {
             center: Point3::new(-1.5, 0.0, 3.5),
             radius: 1.0,
-            material: Material { specularity: 1., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Specular, emitted_radiance: 0. }
         }],
         &[Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(2.0, 0.0, -1.0),
-            material: Material { specularity: 0., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(-1.0, 0.0, -2.0),
-            material: Material { specularity: 0., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 2.0, 0.0),
             normal: Vec3::new(0.0, -1.0, 0.0),
-            material: Material { specularity: 0., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, -3.0, 0.0),
             normal: Vec3::new(0.0, 1.0, 0.0),
-            material: Material { specularity: 0., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 0.0, -10.0),
             normal: Vec3::new(0.0, 0.0, 1.0),
-            material: Material { specularity: 0., emitted_radiance: 0. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
         }]
     );
 
@@ -298,32 +317,36 @@ fn main() {
                 if let Some(intersection) = scene.intersect(ray, prev_object) {
                     prev_object = Some(intersection.object);
 
-                    total_light += scale * intersection.material.emitted_radiance;
+                    total_light += scale * intersection.emitted;
 
-                    if rng.next_f32() < intersection.material.specularity {
-                        let projected = intersection.normal * ray.dir.dot(intersection.normal) / intersection.normal.mag2();
-                        let new_dir = -ray.dir - projected * 2.;
-                        ray = Ray3 {
-                            start: intersection.point,
-                            dir: new_dir
-                        }
-                    } else {
-                        let cand_dir = rand_sphere(&mut rng);
-                        let dir = if cand_dir.dot(intersection.normal) < 0. {
-                            -cand_dir
-                        } else {
-                            cand_dir
-                        };
-                        ray = Ray3 {
-                            start: intersection.point,
-                            dir: dir
-                        };
+                    ray = match intersection.reflection {
+                        Reflection::Specular => {
+                            let projected = intersection.normal * ray.dir.dot(intersection.normal) / intersection.normal.mag2();
+                            let new_dir = -ray.dir - projected * 2.;
+                            Ray3 {
+                                start: intersection.point,
+                                dir: new_dir
+                            }
+                        },
+                        Reflection::Diffuse => {
+                            let cand_dir = rand_sphere(&mut rng);
+                            let dir = if cand_dir.dot(intersection.normal) < 0. {
+                                -cand_dir
+                            } else {
+                                cand_dir
+                            };
 
-                        let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
-                        if scale > 0.2 {
-                            scale *= p;
-                        } else if rng.next_f32() > p {
-                            break;
+                            let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
+                            if scale > 0.2 {
+                                scale *= p;
+                            } else if rng.next_f32() > p {
+                                break;
+                            }
+
+                            Ray3 {
+                                start: intersection.point,
+                                dir: dir
+                            }
                         }
                     }
                 } else {
