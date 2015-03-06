@@ -26,7 +26,8 @@ struct Intersection<ObjectId> {
     time: f32,
     point: Point3,
     normal: Vec3,
-    emitted: f32,
+    // TODO: Use emitted, distribution of directions
+    material: Material,
     object: ObjectId
 }
 
@@ -36,7 +37,7 @@ impl<ObjectId> Intersection<ObjectId> {
             time: self.time,
             point: self.point,
             normal: self.normal,
-            emitted: self.emitted,
+            material: self.material,
             object: func(self.object)
         }
     }
@@ -49,7 +50,9 @@ trait Scene {
     fn intersect(&self, ray: Ray3, previous: Option<Self::ObjectId>) -> Option<Intersection<Self::ObjectId>>;
 }
 
+#[derive(Copy)]
 struct Material {
+    specularity: f32,
     emitted_radiance: f32
 }
 
@@ -83,7 +86,7 @@ impl Scene for Sphere {
                     time: t1,
                     point: p,
                     normal: normal,
-                    emitted: self.material.emitted_radiance,
+                    material: self.material,
                     object: ()
                 })
             } else if t2 > 0. {
@@ -93,7 +96,7 @@ impl Scene for Sphere {
                     time: t2,
                     point: p,
                     normal: normal,
-                    emitted: self.material.emitted_radiance,
+                    material: self.material,
                     object: ()
                 })
             } else {
@@ -129,7 +132,7 @@ impl Scene for Plane {
                     time: time,
                     point: ray.start + ray.dir * time,
                     normal: self.normal,
-                    emitted: self.material.emitted_radiance,
+                    material: self.material,
                     object: ()
                 })
             } else {
@@ -225,42 +228,52 @@ fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
 fn main() {
     let mut rng = rand::weak_rng();
 
-    let rays_per_pixel = 100;
+    let rays_per_pixel = 200;
     let scene: (&[Sphere], &[Plane]) = (
         &[Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
             radius: 0.3,
-            material: Material { emitted_radiance: 0. }
+            material: Material { specularity: 0., emitted_radiance: 0. }
         },
         Sphere {
             center: Point3::new(1.5, 0.0, 3.5),
             radius: 0.35,
-            material: Material { emitted_radiance: 0. }
+            material: Material { specularity: 0., emitted_radiance: 0. }
         },
         Sphere {
             center: Point3::new(1.0, 2.5, 0.5),
             radius: 1.0,
-            material: Material { emitted_radiance: 20. }
+            material: Material { specularity: 0., emitted_radiance: 20. }
+        },
+        Sphere {
+            center: Point3::new(-1.5, 0.0, 3.5),
+            radius: 1.0,
+            material: Material { specularity: 1., emitted_radiance: 0. }
         }],
         &[Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(2.0, 0.0, -1.0),
-            material: Material { emitted_radiance: 0. }
+            material: Material { specularity: 0., emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(-1.0, 0.0, -2.0),
-            material: Material { emitted_radiance: 0. }
+            material: Material { specularity: 0., emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 2.0, 0.0),
             normal: Vec3::new(0.0, -1.0, 0.0),
-            material: Material { emitted_radiance: 0. }
+            material: Material { specularity: 0., emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, -3.0, 0.0),
             normal: Vec3::new(0.0, 1.0, 0.0),
-            material: Material { emitted_radiance: 0. }
+            material: Material { specularity: 0., emitted_radiance: 0. }
+        },
+        Plane {
+            origin: Point3::new(0.0, 0.0, -10.0),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            material: Material { specularity: 0., emitted_radiance: 0. }
         }]
     );
 
@@ -290,24 +303,33 @@ fn main() {
                 if let Some(intersection) = scene.intersect(ray, prev_object) {
                     prev_object = Some(intersection.object);
 
-                    total_light += scale * intersection.emitted;
+                    total_light += scale * intersection.material.emitted_radiance;
 
-                    let cand_dir = rand_sphere(&mut rng);
-                    let dir = if cand_dir.dot(intersection.normal) < 0. {
-                        -cand_dir
+                    if rng.next_f32() < intersection.material.specularity {
+                        let projected = intersection.normal * ray.dir.dot(intersection.normal) / intersection.normal.mag2();
+                        let new_dir = -ray.dir - projected * 2.;
+                        ray = Ray3 {
+                            start: intersection.point,
+                            dir: new_dir
+                        }
                     } else {
-                        cand_dir
-                    };
-                    ray = Ray3 {
-                        start: intersection.point,
-                        dir: dir
-                    };
+                        let cand_dir = rand_sphere(&mut rng);
+                        let dir = if cand_dir.dot(intersection.normal) < 0. {
+                            -cand_dir
+                        } else {
+                            cand_dir
+                        };
+                        ray = Ray3 {
+                            start: intersection.point,
+                            dir: dir
+                        };
 
-                    let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
-                    if scale > 0.2 {
-                        scale *= p;
-                    } else if rng.next_f32() > p {
-                        break;
+                        let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
+                        if scale > 0.2 {
+                            scale *= p;
+                        } else if rng.next_f32() > p {
+                            break;
+                        }
                     }
                 } else {
                     break;
