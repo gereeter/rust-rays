@@ -76,35 +76,30 @@ impl Scene for Sphere {
         let c = offset.mag2() - self.radius*self.radius;
 
         let descrim = b*b - 4.*a*c;
-        if descrim > 0. {
+        if descrim < 0. {
+            return None;
+        }
+
+        let time = {
             let t1 = (-b - descrim.sqrt()) / (2. * a);
             let t2 = (-b + descrim.sqrt()) / (2. * a);
             if t1 > 0. {
-                let p = ray.start + ray.dir * t1;
-                let normal = p - self.center;
-                Some(Intersection {
-                    time: t1,
-                    point: p,
-                    normal: normal,
-                    material: self.material,
-                    object: ()
-                })
+                t1
             } else if t2 > 0. {
-                let p = ray.start + ray.dir * t2;
-                let normal = p - self.center;
-                Some(Intersection {
-                    time: t2,
-                    point: p,
-                    normal: normal,
-                    material: self.material,
-                    object: ()
-                })
+                t2
             } else {
-                None
+                return None
             }
-        } else {
-            None
         }
+        let p = ray.start + ray.dir * time;
+        let normal = p - self.center;
+        Some(Intersection {
+            time: time,
+            point: p,
+            normal: normal,
+            material: self.material,
+            object: ()
+        })
     }
 }
 
