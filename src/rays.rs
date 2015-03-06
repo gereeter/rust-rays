@@ -1,5 +1,5 @@
 //!A raytracer.
-#![feature(path, io)]
+#![feature(core, old_path, old_io)]
 extern crate image;
 extern crate rand;
 
