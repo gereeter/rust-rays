@@ -14,7 +14,7 @@ use rand::Rng;
 
 use point::Point3;
 use vec::Vec3;
-use distribution::{Distribution, Or, Const};
+use distribution::{Distribution, Const};
 
 mod vec;
 mod point;
@@ -51,36 +51,15 @@ trait Scene {
 }
 
 #[derive(Copy)]
-struct Material {
-    reflection: Reflection,
+struct Material<Refl> {
+    reflection: Refl,
     emitted_radiance: f32
 }
 
-#[derive(Copy)]
-enum Reflection {
-    Diffuse,
-    Specular
-}
-
-impl Reflection {
-    fn reflect<ObjectId: Clone>(&self, incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> Or<DiffuseDist<ObjectId>, Const<(f32, Ray3, ObjectId)>>{
-        let projected = normal * incoming.dot(normal) / normal.mag2();
-        let reflected_ray = Ray3 {
-            start: point,
-            dir: -incoming - projected * 2.
-        };
-        let specularity = match *self {
-            Reflection::Diffuse => 0.,
-            Reflection::Specular => 1.
-        };
-        DiffuseDist::new(point, normal, object.clone()).or(Const::new((1., reflected_ray, object.clone())), specularity)
-    }
-}
-
-struct Sphere {
+struct Sphere<Refl> {
     center: Point3,
     radius: f32,
-    material: Material
+    material: Material<Refl>
 }
 
 #[derive(Copy, Clone)]
@@ -89,10 +68,10 @@ enum SphereSource {
     Outside
 }
 
-impl Scene for Sphere {
+impl<Refl: Reflection<SphereSource>> Scene for Sphere<Refl> {
     type ObjectId = SphereSource;
-    type OutDist = Or<DiffuseDist<SphereSource>, Const<(f32, Ray3, SphereSource)>>;
-    fn intersect(&self, ray: Ray3, previous: Option<SphereSource>) -> Option<Intersection<Or<DiffuseDist<SphereSource>, Const<(f32, Ray3, SphereSource)>>>> {
+    type OutDist = Refl::OutDist;
+    fn intersect(&self, ray: Ray3, previous: Option<SphereSource>) -> Option<Intersection<Refl::OutDist>> {
         if let Some(SphereSource::Outside) = previous {
             return None;
         }
@@ -139,16 +118,16 @@ impl Scene for Sphere {
     }
 }
 
-struct Plane {
+struct Plane<Refl> {
     origin: Point3,
     normal: Vec3,
-    material: Material
+    material: Material<Refl>
 }
 
-impl Scene for Plane {
+impl<Refl: Reflection<()>> Scene for Plane<Refl> {
     type ObjectId = ();
-    type OutDist = Or<DiffuseDist<()>, Const<(f32, Ray3, ())>>;
-    fn intersect(&self, ray: Ray3, previous: Option<()>) -> Option<Intersection<Or<DiffuseDist<()>, Const<(f32, Ray3, ())>>>> {
+    type OutDist = Refl::OutDist;
+    fn intersect(&self, ray: Ray3, previous: Option<()>) -> Option<Intersection<Refl::OutDist>> {
         if let Some(()) = previous {
             return None;
         }
@@ -279,20 +258,29 @@ impl<'a, T: ?Sized + Scene> Scene for &'a T {
 }
 
 
-struct DiffuseDist<ObjectId> {
-    point: Point3,
-    normal: Vec3,
-    object: ObjectId
+
+trait Reflection<ObjectId> {
+    type OutDist: Distribution<Output=(f32, Ray3, ObjectId)>;
+    fn reflect(&self, incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> Self::OutDist;
 }
 
-impl<ObjectId> DiffuseDist<ObjectId> {
-    fn new(point: Point3, normal: Vec3, object: ObjectId) -> DiffuseDist<ObjectId> {
+struct Diffuse;
+
+impl<ObjectId: Clone> Reflection<ObjectId> for Diffuse {
+    type OutDist = DiffuseDist<ObjectId>;
+    fn reflect(&self, _incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> DiffuseDist<ObjectId> {
         DiffuseDist {
             point: point,
             normal: normal,
             object: object
         }
     }
+}
+
+struct DiffuseDist<ObjectId> {
+    point: Point3,
+    normal: Vec3,
+    object: ObjectId
 }
 
 impl<ObjectId: Clone> Distribution for DiffuseDist<ObjectId> {
@@ -326,6 +314,23 @@ impl<ObjectId: Clone> Distribution for DiffuseDist<ObjectId> {
     }
 }
 
+struct Specular;
+
+impl<ObjectId: Clone> Reflection<ObjectId> for Specular {
+    type OutDist = Const<(f32, Ray3, ObjectId)>;
+    fn reflect(&self, incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> Const<(f32, Ray3, ObjectId)> {
+        let projected = normal * incoming.dot(normal) / normal.mag2();
+        Const::new((
+            1.,
+            Ray3 {
+                start: point,
+                dir: -incoming - projected * 2.
+            },
+            object
+        ))
+    }
+}
+
 fn clamp(val: f32) -> f32 {
     if val > 1. {
         1.
@@ -338,51 +343,51 @@ fn clamp(val: f32) -> f32 {
 
 fn main() {
     let rays_per_pixel = 200;
-    let scene: (&[Sphere], &[Plane]) = (
+    let scene: ((&[_],_),&[_]) = ((
         &[Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
             radius: 0.3,
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
+            material: Material { reflection: Diffuse, emitted_radiance: 0. }
         },
         Sphere {
             center: Point3::new(1.5, 0.0, 3.5),
             radius: 0.35,
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
+            material: Material { reflection: Diffuse, emitted_radiance: 0. }
         },
         Sphere {
             center: Point3::new(1.0, 2.5, 0.5),
             radius: 1.0,
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 30. }
-        },
-        Sphere {
+            material: Material { reflection: Diffuse, emitted_radiance: 30. }
+        }],
+        &Sphere {
             center: Point3::new(-1.5, 0.0, 3.5),
             radius: 1.0,
-            material: Material { reflection: Reflection::Specular, emitted_radiance: 0. }
-        }],
+            material: Material { reflection: Specular, emitted_radiance: 0. }
+        }),
         &[Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(2.0, 0.0, -1.0),
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
+            material: Material { reflection: Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(-1.0, 0.0, -2.0),
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
+            material: Material { reflection: Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 2.0, 0.0),
             normal: Vec3::new(0.0, -1.0, 0.0),
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
+            material: Material { reflection: Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, -3.0, 0.0),
             normal: Vec3::new(0.0, 1.0, 0.0),
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
+            material: Material { reflection: Diffuse, emitted_radiance: 0. }
         },
         Plane {
             origin: Point3::new(0.0, 0.0, -10.0),
             normal: Vec3::new(0.0, 0.0, 1.0),
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 0. }
+            material: Material { reflection: Diffuse, emitted_radiance: 0. }
         }]
     );
 
