@@ -1,7 +1,7 @@
 use std::ops::{Add, Sub};
 use vec::Vec3;
 
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 pub struct Point3 {
     inner: Vec3
 }

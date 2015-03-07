@@ -14,34 +14,30 @@ use rand::Rng;
 
 use point::Point3;
 use vec::Vec3;
+use distribution::{Distribution, Or, Const};
 
 mod vec;
 mod point;
+mod distribution;
 
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 struct Ray3 {
     start: Point3,
     dir: Vec3
 }
 
-struct Intersection<ObjectId> {
+struct Intersection<OutDist> {
     time: f32,
-    point: Point3,
-    normal: Vec3,
     emitted: f32,
-    reflection: Reflection,
-    object: ObjectId
+    reflection: OutDist
 }
 
-impl<ObjectId> Intersection<ObjectId> {
-    fn map_obj<NewObjectId, F: FnOnce(ObjectId) -> NewObjectId>(self, func: F) -> Intersection<NewObjectId> {
+impl<OutDist> Intersection<OutDist> {
+    fn map_dist<NewOutDist, F: FnOnce(OutDist) -> NewOutDist>(self, func: F) -> Intersection<NewOutDist> {
         Intersection {
             time: self.time,
-            point: self.point,
-            normal: self.normal,
             emitted: self.emitted,
-            reflection: self.reflection,
-            object: func(self.object)
+            reflection: func(self.reflection)
         }
     }
 }
@@ -49,8 +45,9 @@ impl<ObjectId> Intersection<ObjectId> {
 trait Scene {
     // TODO: Should this have a "not present" id?
     type ObjectId: Copy;
+    type OutDist: Distribution<Output=(f32, Ray3, Self::ObjectId)>;
 
-    fn intersect(&self, ray: Ray3, previous: Option<Self::ObjectId>) -> Option<Intersection<Self::ObjectId>>;
+    fn intersect(&self, ray: Ray3, previous: Option<Self::ObjectId>) -> Option<Intersection<Self::OutDist>>;
 }
 
 #[derive(Copy)]
@@ -65,13 +62,28 @@ enum Reflection {
     Specular
 }
 
+impl Reflection {
+    fn reflect<ObjectId: Clone>(&self, incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> Or<DiffuseDist<ObjectId>, Const<(f32, Ray3, ObjectId)>>{
+        let projected = normal * incoming.dot(normal) / normal.mag2();
+        let reflected_ray = Ray3 {
+            start: point,
+            dir: -incoming - projected * 2.
+        };
+        let specularity = match *self {
+            Reflection::Diffuse => 0.,
+            Reflection::Specular => 1.
+        };
+        DiffuseDist::new(point, normal, object.clone()).or(Const::new((1., reflected_ray, object.clone())), specularity)
+    }
+}
+
 struct Sphere {
     center: Point3,
     radius: f32,
     material: Material
 }
 
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 enum SphereSource {
     Inside,
     Outside
@@ -79,7 +91,8 @@ enum SphereSource {
 
 impl Scene for Sphere {
     type ObjectId = SphereSource;
-    fn intersect(&self, ray: Ray3, previous: Option<SphereSource>) -> Option<Intersection<SphereSource>> {
+    type OutDist = Or<DiffuseDist<SphereSource>, Const<(f32, Ray3, SphereSource)>>;
+    fn intersect(&self, ray: Ray3, previous: Option<SphereSource>) -> Option<Intersection<Or<DiffuseDist<SphereSource>, Const<(f32, Ray3, SphereSource)>>>> {
         if let Some(SphereSource::Outside) = previous {
             return None;
         }
@@ -111,14 +124,17 @@ impl Scene for Sphere {
         let normal = p - self.center;
         Some(Intersection {
             time: time,
-            point: p,
-            normal: normal,
             emitted: self.material.emitted_radiance,
-            reflection: self.material.reflection,
-            object: match previous {
-                None => SphereSource::Outside,
-                Some(source) => source
-            }
+            reflection: self.material.reflection.reflect(
+                ray.dir,
+                normal,
+                p,
+                previous.unwrap_or(if c < 0. {
+                    SphereSource::Inside
+                } else {
+                    SphereSource::Outside
+                })
+            )
         })
     }
 }
@@ -131,7 +147,8 @@ struct Plane {
 
 impl Scene for Plane {
     type ObjectId = ();
-    fn intersect(&self, ray: Ray3, previous: Option<()>) -> Option<Intersection<()>> {
+    type OutDist = Or<DiffuseDist<()>, Const<(f32, Ray3, ())>>;
+    fn intersect(&self, ray: Ray3, previous: Option<()>) -> Option<Intersection<Or<DiffuseDist<()>, Const<(f32, Ray3, ())>>>> {
         if let Some(()) = previous {
             return None;
         }
@@ -143,13 +160,16 @@ impl Scene for Plane {
             let offset = ray.start - self.origin;
             let time = -offset.dot(self.normal) / divisor;
             if time > 0. {
+                let point = ray.start + ray.dir * time;
                 Some(Intersection {
                     time: time,
-                    point: ray.start + ray.dir * time,
-                    normal: self.normal,
                     emitted: self.material.emitted_radiance,
-                    reflection: self.material.reflection,
-                    object: ()
+                    reflection: self.material.reflection.reflect(
+                        ray.dir,
+                        self.normal,
+                        point,
+                        ()
+                    )
                 })
             } else {
                 None
@@ -164,9 +184,27 @@ enum Choice<A, B> {
     OptB(B)
 }
 
+impl<AObj, BObj, A: Distribution<Output=(f32, Ray3, AObj)>, B: Distribution<Output=(f32, Ray3, BObj)>> Distribution for Choice<A, B> {
+    type Output = (f32, Ray3, Choice<AObj, BObj>);
+
+    fn sample<R: Rng>(&self, rng: &mut R) -> (f32, Ray3, Choice<AObj, BObj>) {
+        match *self {
+            Choice::OptA(ref a) => {
+                let (scale, ray, obj) = a.sample(rng);
+                (scale, ray, Choice::OptA(obj))
+            },
+            Choice::OptB(ref b) => {
+                let (scale, ray, obj) = b.sample(rng);
+                (scale, ray, Choice::OptB(obj))
+            }
+        }
+    }
+}
+
 impl<A: Scene, B: Scene> Scene for (A, B) {
     type ObjectId = Choice<A::ObjectId, B::ObjectId>;
-    fn intersect(&self, ray: Ray3, previous: Option<Choice<A::ObjectId, B::ObjectId>>) -> Option<Intersection<Choice<A::ObjectId, B::ObjectId>>> {
+    type OutDist = Choice<A::OutDist, B::OutDist>;
+    fn intersect(&self, ray: Ray3, previous: Option<Choice<A::ObjectId, B::ObjectId>>) -> Option<Intersection<Choice<A::OutDist, B::OutDist>>> {
         let (aid, bid) = match previous {
             None => (None, None),
             Some(Choice::OptA(aid)) => (Some(aid), None),
@@ -175,21 +213,36 @@ impl<A: Scene, B: Scene> Scene for (A, B) {
 
         match (self.0.intersect(ray, aid), self.1.intersect(ray, bid)) {
             (Some(ai), Some(bi)) => if ai.time < bi.time {
-                Some(ai.map_obj(Choice::OptA))
+                Some(ai.map_dist(Choice::OptA))
             } else {
-                Some(bi.map_obj(Choice::OptB))
+                Some(bi.map_dist(Choice::OptB))
             },
-            (Some(ai), None) => Some(ai.map_obj(Choice::OptA)),
-            (None, Some(bi)) => Some(bi.map_obj(Choice::OptB)),
+            (Some(ai), None) => Some(ai.map_dist(Choice::OptA)),
+            (None, Some(bi)) => Some(bi.map_dist(Choice::OptB)),
             (None, None) => None
         }
     }
 }
 
+struct TagObject<T, Dist> {
+    tag: T,
+    dist: Dist
+}
+
+impl<T: Clone, O, Dist: Distribution<Output=(f32, Ray3, O)>> Distribution for TagObject<T, Dist> {
+    type Output = (f32, Ray3, (T, O));
+
+    fn sample<R: Rng>(&self, rng: &mut R) -> (f32, Ray3, (T, O)) {
+        let (scale, ray, obj) = self.dist.sample(rng);
+        (scale, ray, (self.tag.clone(), obj))
+    }
+}
+
 impl<T: Scene> Scene for [T] {
     type ObjectId = (usize, T::ObjectId);
-    fn intersect(&self, ray: Ray3, previous: Option<(usize, T::ObjectId)>) -> Option<Intersection<(usize, T::ObjectId)>> {
-        let mut best: Option<Intersection<(usize, T::ObjectId)>> = None;
+    type OutDist = TagObject<usize, T::OutDist>;
+    fn intersect(&self, ray: Ray3, previous: Option<(usize, T::ObjectId)>) -> Option<Intersection<TagObject<usize, T::OutDist>>> {
+        let mut best: Option<Intersection<TagObject<usize, T::OutDist>>> = None;
 
         for (id, obj) in self.iter().enumerate() {
             let prev = match previous {
@@ -208,7 +261,7 @@ impl<T: Scene> Scene for [T] {
                 };
 
                 if new_best {
-                    best = Some(intersection.map_obj(|obj| (id, obj)));
+                    best = Some(intersection.map_dist(|dist| TagObject { tag: id, dist: dist }));
                 }
             }
         }
@@ -219,8 +272,57 @@ impl<T: Scene> Scene for [T] {
 
 impl<'a, T: ?Sized + Scene> Scene for &'a T {
     type ObjectId = T::ObjectId;
-    fn intersect(&self, ray: Ray3, previous: Option<T::ObjectId>) -> Option<Intersection<T::ObjectId>> {
+    type OutDist = T::OutDist;
+    fn intersect(&self, ray: Ray3, previous: Option<T::ObjectId>) -> Option<Intersection<T::OutDist>> {
         (*self).intersect(ray, previous)
+    }
+}
+
+
+struct DiffuseDist<ObjectId> {
+    point: Point3,
+    normal: Vec3,
+    object: ObjectId
+}
+
+impl<ObjectId> DiffuseDist<ObjectId> {
+    fn new(point: Point3, normal: Vec3, object: ObjectId) -> DiffuseDist<ObjectId> {
+        DiffuseDist {
+            point: point,
+            normal: normal,
+            object: object
+        }
+    }
+}
+
+impl<ObjectId: Clone> Distribution for DiffuseDist<ObjectId> {
+    type Output = (f32, Ray3, ObjectId);
+
+    fn sample<R: Rng>(&self, rng: &mut R) -> (f32, Ray3, ObjectId) {
+        fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
+           let z = rand::distributions::Range::new(-1., 1.).ind_sample(rng);
+           let r = (1. - z*z).sqrt();
+           let angle = rand::distributions::Range::new(0., PI_2).ind_sample(rng);
+           Vec3::new(r*angle.cos(), r*angle.sin(), z)
+       }
+
+        let cand_dir = rand_sphere(rng);
+        let dir = if cand_dir.dot(self.normal) < 0. {
+            -cand_dir
+        } else {
+            cand_dir
+        };
+
+        let scale = dir.dot(self.normal) / self.normal.mag2().sqrt();
+
+        (
+            scale,
+            Ray3 {
+                start: self.point,
+                dir: dir
+            },
+            self.object.clone()
+        )
     }
 }
 
@@ -232,13 +334,6 @@ fn clamp(val: f32) -> f32 {
     } else {
         val
     }
-}
-
-fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
-    let z = rand::distributions::Range::new(-1., 1.).ind_sample(rng);
-    let r = (1. - z*z).sqrt();
-    let angle = rand::distributions::Range::new(0., PI_2).ind_sample(rng);
-    Vec3::new(r*angle.cos(), r*angle.sin(), z)
 }
 
 fn main() {
@@ -257,7 +352,7 @@ fn main() {
         Sphere {
             center: Point3::new(1.0, 2.5, 0.5),
             radius: 1.0,
-            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 20. }
+            material: Material { reflection: Reflection::Diffuse, emitted_radiance: 30. }
         },
         Sphere {
             center: Point3::new(-1.5, 0.0, 3.5),
@@ -333,39 +428,16 @@ fn main() {
                         let mut scale = 1.;
                         loop {
                             if let Some(intersection) = scene.intersect(ray, prev_object) {
-                                prev_object = Some(intersection.object);
-
                                 total_light += scale * intersection.emitted;
 
-                                ray = match intersection.reflection {
-                                    Reflection::Specular => {
-                                        let projected = intersection.normal * ray.dir.dot(intersection.normal) / intersection.normal.mag2();
-                                        let new_dir = -ray.dir - projected * 2.;
-                                        Ray3 {
-                                            start: intersection.point,
-                                            dir: new_dir
-                                        }
-                                    },
-                                    Reflection::Diffuse => {
-                                        let cand_dir = rand_sphere(&mut rng);
-                                        let dir = if cand_dir.dot(intersection.normal) < 0. {
-                                            -cand_dir
-                                        } else {
-                                            cand_dir
-                                        };
+                                let (reflected, new_ray, object) = intersection.reflection.sample(&mut rng);
+                                ray = new_ray;
+                                prev_object = Some(object);
 
-                                        let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
-                                        if scale > 0.2 {
-                                            scale *= p;
-                                        } else if rng.next_f32() > p {
-                                            break;
-                                        }
-
-                                        Ray3 {
-                                            start: intersection.point,
-                                            dir: dir
-                                        }
-                                    }
+                                if scale > 0.2 {
+                                    scale *= reflected;
+                                } else if rng.next_f32() > reflected {
+                                    break;
                                 }
                             } else {
                                 break;
