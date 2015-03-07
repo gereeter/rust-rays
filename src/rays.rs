@@ -1,11 +1,13 @@
 //!A raytracer.
-#![feature(core, old_path, old_io)]
+#![feature(core, os, old_path, old_io)]
 extern crate image;
 extern crate rand;
 
 use std::old_io::File;
 use std::num::Float;
 use std::f32::consts::PI_2;
+use std::thread;
+use std::os;
 
 use rand::distributions::IndependentSample;
 use rand::Rng;
@@ -240,8 +242,6 @@ fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
 }
 
 fn main() {
-    let mut rng = rand::weak_rng();
-
     let rays_per_pixel = 200;
     let scene: (&[Sphere], &[Plane]) = (
         &[Sphere {
@@ -291,6 +291,8 @@ fn main() {
         }]
     );
 
+    let num_threads = os::num_cpus();
+
     let imgx = 800;
     let imgy = 800;
 
@@ -298,10 +300,25 @@ fn main() {
     let scaley = 4.0 / imgy as f32;
 
     // Create a new ImgBuf with width: imgx and height: imgy
-    let mut imgbuf = image::ImageBuffer::new(imgx, imgy);
+    let mut imgbuf = image::ImageBuffer::<image::Luma<u8>>::new(imgx, imgy);
 
-    // Iterate over the coordiantes and pixels of the image
-    for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
+    // Iterate over the pixels in parallel
+    {
+        let mut img_data = imgbuf.as_mut_slice();
+        let chunk_size = img_data.len() / num_threads + 1;
+        img_data.chunks_mut(chunk_size).enumerate().map(|(chunk_i, chunk)| {
+            thread::scoped(move || {
+                let mut rng = rand::weak_rng();
+
+                let base = (chunk_i * chunk_size) as u32;
+                let mut x = base % imgx;
+                let mut y = base / imgx;
+                for pixel in chunk.iter_mut() {
+                    x += 1;
+                    if x == imgx {
+                        x = 0;
+                        y += 1;
+                    }
         let cy = -(y as f32 * scaley - 2.0);
         let cx = x as f32 * scalex - 2.0;
 
@@ -355,9 +372,12 @@ fn main() {
             }
         }
 
-        // Create an 8bit pixel of type Luma and value i
-        // and assign in to the pixel at position (x, y)
-        *pixel = image::Luma([(clamp(total_light / rays_per_pixel as f32)*255.) as u8]);
+                    // Create an 8bit pixel of type Luma and value i
+                    // and assign in to the pixel at position (x, y)
+                    *pixel = (clamp(total_light / rays_per_pixel as f32)*255.) as u8;
+                }
+            })
+        }).collect::<Vec<_>>();
     }
 
     // Save the image as “out.png”
