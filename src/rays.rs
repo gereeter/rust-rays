@@ -5,26 +5,22 @@ extern crate rand;
 
 use std::old_io::File;
 use std::num::Float;
-use std::f32::consts::PI_2;
 use std::thread;
 use std::os;
 
-use rand::distributions::IndependentSample;
 use rand::Rng;
 
 use point::Point3;
 use vec::Vec3;
-use distribution::{Distribution, Const};
+use ray::Ray3;
+use distribution::Distribution;
+use material::{Material, Reflection, Diffuse, Specular};
 
 mod vec;
 mod point;
+mod ray;
 mod distribution;
-
-#[derive(Copy, Clone)]
-struct Ray3 {
-    start: Point3,
-    dir: Vec3
-}
+mod material;
 
 struct Intersection<OutDist> {
     time: f32,
@@ -48,12 +44,6 @@ trait Scene {
     type OutDist: Distribution<Output=(f32, Ray3, Self::ObjectId)>;
 
     fn intersect(&self, ray: Ray3, previous: Option<Self::ObjectId>) -> Option<Intersection<Self::OutDist>>;
-}
-
-#[derive(Copy)]
-struct Material<Refl> {
-    reflection: Refl,
-    emitted_radiance: f32
 }
 
 struct Sphere<Refl> {
@@ -103,8 +93,8 @@ impl<Refl: Reflection<SphereSource>> Scene for Sphere<Refl> {
         let normal = p - self.center;
         Some(Intersection {
             time: time,
-            emitted: self.material.emitted_radiance,
-            reflection: self.material.reflection.reflect(
+            emitted: self.material.emitted(),
+            reflection: self.material.reflection().reflect(
                 ray.dir,
                 normal,
                 p,
@@ -142,8 +132,8 @@ impl<Refl: Reflection<()>> Scene for Plane<Refl> {
                 let point = ray.start + ray.dir * time;
                 Some(Intersection {
                     time: time,
-                    emitted: self.material.emitted_radiance,
-                    reflection: self.material.reflection.reflect(
+                    emitted: self.material.emitted(),
+                    reflection: self.material.reflection().reflect(
                         ray.dir,
                         self.normal,
                         point,
@@ -257,80 +247,6 @@ impl<'a, T: ?Sized + Scene> Scene for &'a T {
     }
 }
 
-
-
-trait Reflection<ObjectId> {
-    type OutDist: Distribution<Output=(f32, Ray3, ObjectId)>;
-    fn reflect(&self, incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> Self::OutDist;
-}
-
-struct Diffuse;
-
-impl<ObjectId: Clone> Reflection<ObjectId> for Diffuse {
-    type OutDist = DiffuseDist<ObjectId>;
-    fn reflect(&self, _incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> DiffuseDist<ObjectId> {
-        DiffuseDist {
-            point: point,
-            normal: normal,
-            object: object
-        }
-    }
-}
-
-struct DiffuseDist<ObjectId> {
-    point: Point3,
-    normal: Vec3,
-    object: ObjectId
-}
-
-impl<ObjectId: Clone> Distribution for DiffuseDist<ObjectId> {
-    type Output = (f32, Ray3, ObjectId);
-
-    fn sample<R: Rng>(&self, rng: &mut R) -> (f32, Ray3, ObjectId) {
-        fn rand_sphere<R: rand::Rng>(rng: &mut R) -> Vec3 {
-           let z = rand::distributions::Range::new(-1., 1.).ind_sample(rng);
-           let r = (1. - z*z).sqrt();
-           let angle = rand::distributions::Range::new(0., PI_2).ind_sample(rng);
-           Vec3::new(r*angle.cos(), r*angle.sin(), z)
-       }
-
-        let cand_dir = rand_sphere(rng);
-        let dir = if cand_dir.dot(self.normal) < 0. {
-            -cand_dir
-        } else {
-            cand_dir
-        };
-
-        let scale = dir.dot(self.normal) / self.normal.mag2().sqrt();
-
-        (
-            scale,
-            Ray3 {
-                start: self.point,
-                dir: dir
-            },
-            self.object.clone()
-        )
-    }
-}
-
-struct Specular;
-
-impl<ObjectId: Clone> Reflection<ObjectId> for Specular {
-    type OutDist = Const<(f32, Ray3, ObjectId)>;
-    fn reflect(&self, incoming: Vec3, normal: Vec3, point: Point3, object: ObjectId) -> Const<(f32, Ray3, ObjectId)> {
-        let projected = normal * incoming.dot(normal) / normal.mag2();
-        Const::new((
-            1.,
-            Ray3 {
-                start: point,
-                dir: -incoming - projected * 2.
-            },
-            object
-        ))
-    }
-}
-
 fn clamp(val: f32) -> f32 {
     if val > 1. {
         1.
@@ -347,47 +263,47 @@ fn main() {
         &[Sphere {
             center: Point3::new(1.2, 0.0, 5.0),
             radius: 0.3,
-            material: Material { reflection: Diffuse, emitted_radiance: 0. }
+            material: Material::new(Diffuse, 0.)
         },
         Sphere {
             center: Point3::new(1.5, 0.0, 3.5),
             radius: 0.35,
-            material: Material { reflection: Diffuse, emitted_radiance: 0. }
+            material: Material::new(Diffuse, 0.)
         },
         Sphere {
             center: Point3::new(1.0, 2.5, 0.5),
             radius: 1.0,
-            material: Material { reflection: Diffuse, emitted_radiance: 30. }
+            material: Material::new(Diffuse, 30.)
         }],
         &Sphere {
             center: Point3::new(-1.5, 0.0, 3.5),
             radius: 1.0,
-            material: Material { reflection: Specular, emitted_radiance: 0. }
+            material: Material::new(Specular, 0.)
         }),
         &[Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(2.0, 0.0, -1.0),
-            material: Material { reflection: Diffuse, emitted_radiance: 0. }
+            material: Material::new(Diffuse, 0.)
         },
         Plane {
             origin: Point3::new(0.0, 0.0, 8.0),
             normal: Vec3::new(-1.0, 0.0, -2.0),
-            material: Material { reflection: Diffuse, emitted_radiance: 0. }
+            material: Material::new(Diffuse, 0.)
         },
         Plane {
             origin: Point3::new(0.0, 2.0, 0.0),
             normal: Vec3::new(0.0, -1.0, 0.0),
-            material: Material { reflection: Diffuse, emitted_radiance: 0. }
+            material: Material::new(Diffuse, 0.)
         },
         Plane {
             origin: Point3::new(0.0, -3.0, 0.0),
             normal: Vec3::new(0.0, 1.0, 0.0),
-            material: Material { reflection: Diffuse, emitted_radiance: 0. }
+            material: Material::new(Diffuse, 0.)
         },
         Plane {
             origin: Point3::new(0.0, 0.0, -10.0),
             normal: Vec3::new(0.0, 0.0, 1.0),
-            material: Material { reflection: Diffuse, emitted_radiance: 0. }
+            material: Material::new(Diffuse, 0.)
         }]
     );
 
