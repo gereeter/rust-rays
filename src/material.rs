@@ -50,7 +50,7 @@ impl<ObjectId: Clone> Reflection<ObjectId> for Diffuse {
     }
 }
 
-pub struct DiffuseDist<ObjectId> {
+struct DiffuseDist<ObjectId> {
     point: Point3,
     normal: Vec3,
     object: ObjectId
