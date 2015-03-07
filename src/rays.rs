@@ -319,58 +319,59 @@ fn main() {
                         x = 0;
                         y += 1;
                     }
-        let cy = -(y as f32 * scaley - 2.0);
-        let cx = x as f32 * scalex - 2.0;
 
-        let mut total_light = 0.;
-        for _ in 0..rays_per_pixel {
-            let mut ray = Ray3 {
-                start: Point3::new(0., 0., -8.0),
-                dir: Vec3::new(cx, cy, 8.0)
-            };
-            let mut prev_object = None;
-            let mut scale = 1.;
-            loop {
-                if let Some(intersection) = scene.intersect(ray, prev_object) {
-                    prev_object = Some(intersection.object);
+                    let cy = -(y as f32 * scaley - 2.0);
+                    let cx = x as f32 * scalex - 2.0;
 
-                    total_light += scale * intersection.emitted;
+                    let mut total_light = 0.;
+                    for _ in 0..rays_per_pixel {
+                        let mut ray = Ray3 {
+                            start: Point3::new(0., 0., -8.0),
+                            dir: Vec3::new(cx, cy, 8.0)
+                        };
+                        let mut prev_object = None;
+                        let mut scale = 1.;
+                        loop {
+                            if let Some(intersection) = scene.intersect(ray, prev_object) {
+                                prev_object = Some(intersection.object);
 
-                    ray = match intersection.reflection {
-                        Reflection::Specular => {
-                            let projected = intersection.normal * ray.dir.dot(intersection.normal) / intersection.normal.mag2();
-                            let new_dir = -ray.dir - projected * 2.;
-                            Ray3 {
-                                start: intersection.point,
-                                dir: new_dir
-                            }
-                        },
-                        Reflection::Diffuse => {
-                            let cand_dir = rand_sphere(&mut rng);
-                            let dir = if cand_dir.dot(intersection.normal) < 0. {
-                                -cand_dir
+                                total_light += scale * intersection.emitted;
+
+                                ray = match intersection.reflection {
+                                    Reflection::Specular => {
+                                        let projected = intersection.normal * ray.dir.dot(intersection.normal) / intersection.normal.mag2();
+                                        let new_dir = -ray.dir - projected * 2.;
+                                        Ray3 {
+                                            start: intersection.point,
+                                            dir: new_dir
+                                        }
+                                    },
+                                    Reflection::Diffuse => {
+                                        let cand_dir = rand_sphere(&mut rng);
+                                        let dir = if cand_dir.dot(intersection.normal) < 0. {
+                                            -cand_dir
+                                        } else {
+                                            cand_dir
+                                        };
+
+                                        let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
+                                        if scale > 0.2 {
+                                            scale *= p;
+                                        } else if rng.next_f32() > p {
+                                            break;
+                                        }
+
+                                        Ray3 {
+                                            start: intersection.point,
+                                            dir: dir
+                                        }
+                                    }
+                                }
                             } else {
-                                cand_dir
-                            };
-
-                            let p = dir.dot(intersection.normal) / intersection.normal.mag2().sqrt();
-                            if scale > 0.2 {
-                                scale *= p;
-                            } else if rng.next_f32() > p {
                                 break;
-                            }
-
-                            Ray3 {
-                                start: intersection.point,
-                                dir: dir
                             }
                         }
                     }
-                } else {
-                    break;
-                }
-            }
-        }
 
                     // Create an 8bit pixel of type Luma and value i
                     // and assign in to the pixel at position (x, y)
