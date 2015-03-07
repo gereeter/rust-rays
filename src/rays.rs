@@ -14,7 +14,10 @@ use vec::Vec3;
 use ray::Ray3;
 use distribution::Distribution;
 use material::{Material, Diffuse, Specular};
-use scene::{Scene, Sphere, Plane};
+use scene::Scene;
+
+use sphere::Sphere;
+use plane::Plane;
 
 mod vec;
 mod point;
@@ -23,6 +26,9 @@ mod distribution;
 
 mod material;
 mod scene;
+
+mod sphere;
+mod plane;
 
 fn clamp(val: f32) -> f32 {
     if val > 1. {
