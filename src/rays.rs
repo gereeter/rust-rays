@@ -1,11 +1,11 @@
 //!A raytracer.
-#![feature(core, os, old_path, old_io)]
+#![feature(core)]
 extern crate image;
 extern crate rand;
+extern crate num_cpus;
 
-use std::old_io::File;
+use std::fs::File;
 use std::thread;
-use std::os;
 
 use rand::Rng;
 
@@ -90,7 +90,7 @@ fn main() {
         )]
     );
 
-    let num_threads = os::num_cpus();
+    let num_threads = num_cpus::get();
 
     let imgx = 800;
     let imgy = 800;
@@ -158,7 +158,7 @@ fn main() {
     }
 
     // Save the image as “out.png”
-    let ref mut fout = File::create(&Path::new("out.png")).unwrap();
+    let ref mut fout = File::create("out.png").unwrap();
 
     // We must indicate the image’s color type and what format to save as
     let _ = image::ImageLuma8(imgbuf).save(fout, image::PNG);
